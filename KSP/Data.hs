@@ -12,6 +12,7 @@ import Data.Foldable
 import Data.Traversable
 
 import Control.Applicative
+import Control.Arrow
 
 dot :: (Num a, Foldable f, Applicative f) => f a -> f a -> a
 dot x y = sum $ (*) <$> x <*> y
@@ -87,7 +88,7 @@ data Part v = Part {
     capacity :: ResourceVector v, -- units
     geometry :: Geometry,
     thruster :: Maybe (Thruster v)
-}
+} deriving (Eq, Show, Read)
 
 lfo :: Fractional a => ResourceVector a
 lfo = zero_resource {liquid_fuel = 0.9, oxidizer = 1.1}
@@ -116,18 +117,18 @@ data Thruster v = Thruster {
     isp :: PiecewiseLinear v, -- atmospheric pressure -> isp in seconds
     throttleable :: Bool,
     gimbal :: v
-}
+} deriving (Eq, Show, Read)
 
 -- max_flow (kg/s) = max_thrust / (g * isp)
 
-data Size = Tiny | Small | Mk1 | Mk2 | Large | Mk3 | ExtraLarge
+data Size = Tiny | Small | Mk1 | Mk2 | Large | Mk3 | ExtraLarge deriving (Eq, Ord, Show, Read)
 
 data Geometry = Geometry {
     asymetrical :: Bool,
     radial_mount :: Bool,
     top :: [Size],
     bottom :: [Size]
-}
+} deriving (Eq, Show, Read)
 
 symetric :: [Size] -> [Size] -> Geometry
 symetric top bottom = Geometry {
@@ -429,8 +430,8 @@ stage payload engine components = Stage {
         total_parts = length components
         total_cost = resource_cost `dot` total_capacity + (sum . map dry_cost) components
 
-extend :: Stage -> Part Rational -> Stage
-extend s p = s' where s' = Stage {
+extend :: Part Rational -> Stage -> Stage
+extend p s = s' where s' = Stage {
     engine = engine s,
     delta_v = log ((fromRational . total_mass) s'/(fromRational . total_dry_mass) s') * (fromRational . engine_isp . engine) s' * g,
     stage_specific_implulse = delta_v s' / log ((fromRational . total_mass) s' / (fromRational . payload_mass) s'),
@@ -443,10 +444,15 @@ extend s p = s' where s' = Stage {
     payload_mass = payload_mass s
 }
 
-type StageMetric = (Double, Down Int, Down Rational)
+-- If a part's asymetrical we have to add two of them the first time we add one.
+extend_symetric :: Part Rational -> Stage -> Stage
+extend_symetric p s =
+    if (asymetrical . geometry) p && notElem p (components s)
+    then (extend p . extend p) s
+    else extend p s
 
-stage_metric :: Stage -> StageMetric
-stage_metric s = (stage_specific_implulse s, (Down . total_parts) s, (Down . total_cost) s)
+
+stage_metric = stage_specific_implulse &&& Down . total_parts &&& Down . total_cost
         
 increasingOn :: Ord b => (a -> b) -> [a] -> [a]
 increasingOn f (x : xs) = x : go (f x) xs
@@ -472,18 +478,17 @@ optimal_engine_stage payload engine part_db = expand empty_stage parts []
                 increasing = increasingOn (stage_metric . snd) sorted
                 sorted = sortOn (expansion_order . snd) filtered
                 filtered = filter (\(_, s) -> stage_metric s > stage_metric best_stage) expanded
-                expanded = [(p, extend best_stage (head p)) | p <- init . tails $ parts] ++ ss
+                expanded = [(p, extend_symetric (head p) best_stage) | p <- (init . tails) parts] ++ ss
                 
-        expansion_order :: Stage -> (Rational, Down StageMetric)
-        expansion_order s = (total_dry_mass s, (Down . stage_metric) s)
-        
+        expansion_order = total_dry_mass &&& Down . stage_metric
+
         parts :: [Part Rational]
         parts = sortOn (Down . dry_mass) . filter (fuels stage_thruster) $ part_db
         
         stage_thruster = (fromJust . thruster) engine
         
         empty_stage :: Stage
-        empty_stage = stage payload stage_thruster [engine]
+        empty_stage = extend_symetric engine $ stage payload stage_thruster []
 
         
 optimal_stage :: Rational -> [Part Rational] -> Stage
