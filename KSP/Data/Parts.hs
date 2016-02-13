@@ -1,85 +1,11 @@
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveTraversable #-}
+module KSP.Data.Parts where
 
-import Prelude hiding (sum, mapM_)
-
-import Data.List
 import Data.Maybe
-import Data.Ord
 
-import Data.Foldable
-import Data.Traversable
+import Math.Linear
+import Math.Interpolation
 
-import Control.Applicative
-import Control.Arrow
-
-dot :: (Num a, Foldable f, Applicative f) => f a -> f a -> a
-dot x y = sum $ (*) <$> x <*> y
-
-proj :: (Fractional a, Foldable f, Applicative f) => f a -> f a -> f a
-proj s v = ((v `dot` s/s `dot` s)*) <$> s
-
-towards :: (Fractional a, Foldable f, Applicative f, Eq (f a)) => f a -> f a -> Bool
-towards s v = v /= pure 0 && proj s v == v
-
-g :: Fractional v => v
-g = 9.81
-
-data ResourceVector v = ResourceVector {
-    electric_charge :: v,
-    liquid_fuel :: v,
-    oxidizer :: v,
-    intake_air :: v,
-    solid_fuel :: v,
-    monopropellant :: v,
-    xenon :: v,
-    ore :: v,
-    ablator :: v
-} deriving (Eq, Show, Read, Functor, Foldable, Traversable)
-
-instance Applicative ResourceVector where
-    pure a = ResourceVector a a a a a a a a a
-    fs <*> xs = ResourceVector {
-        electric_charge = electric_charge fs $ electric_charge xs,
-        liquid_fuel     = liquid_fuel     fs $ liquid_fuel     xs,
-        oxidizer        = oxidizer        fs $ oxidizer        xs,
-        intake_air      = intake_air      fs $ intake_air      xs,
-        solid_fuel      = solid_fuel      fs $ solid_fuel      xs,
-        monopropellant  = monopropellant  fs $ monopropellant  xs,
-        xenon           = xenon           fs $ xenon           xs,
-        ore             = ore             fs $ ore             xs,
-        ablator         = ablator         fs $ ablator         xs
-    }
-
-zero_resource :: Num a => ResourceVector a
-zero_resource = pure 0
-
-resource_density :: Fractional a => ResourceVector a -- tons/unit
-resource_density = (/1000) <$> ResourceVector {
-    electric_charge = 0,
-    liquid_fuel = 5, -- kg/unit
-    oxidizer = 5,
-    intake_air = 5,
-    solid_fuel = 7.5,
-    monopropellant = 4,
-    xenon = 0.1,
-    ore = 10,
-    ablator = 1
-}
-
-resource_cost :: Fractional a => ResourceVector a -- funds/unit
-resource_cost = ResourceVector {
-    electric_charge = 0,
-    liquid_fuel = 0.8,
-    oxidizer = 0.18,
-    intake_air = 0,
-    solid_fuel = 0.6,
-    monopropellant = 1.2,
-    xenon = 4,
-    ore = 0.02,
-    ablator = 0.5
-}
+import KSP.Data.Resources
 
 data Part v = Part {
     name :: String,
@@ -90,6 +16,7 @@ data Part v = Part {
     thruster :: Maybe (Thruster v)
 } deriving (Eq, Show, Read)
 
+-- propellants
 lfo :: Fractional a => ResourceVector a
 lfo = zero_resource {liquid_fuel = 0.9, oxidizer = 1.1}
 
@@ -105,7 +32,6 @@ xe = zero_resource {xenon = 0.1, electric_charge = 18}
 rcs :: Fractional a => ResourceVector a
 rcs = zero_resource {monopropellant = 1}
 
-type PiecewiseLinear v = [(v, v)]
 
 -- isp_current = isp_vac - min(p,1) * (isp_vac - isp_atm) where p = pressure in atmospheres
 -- https://www.reddit.com/r/KerbalAcademy/comments/1mmuyz/specific_impulse_and_atmospheric_cutoff/
@@ -388,149 +314,3 @@ parts = [
     solid_booster "Launch Escape System"         (symetric [] [Small]) 1000 0.9  750 [(0, 180), (1, 160), (8, 0.001)]   30
     
     ]
-    
-fuels :: Thruster Rational -> Part Rational -> Bool
-fuels engine part = towards (propellant engine) (capacity part) && isNothing (thruster part)
-
-
-engine_isp = snd . head . isp
-
-data Stage = Stage {
-    engine :: Thruster Rational,
-    delta_v :: Double,
-    stage_specific_implulse :: Double,
-    total_dry_mass :: Rational,
-    total_capacity :: ResourceVector Rational,
-    total_mass :: Rational,
-    total_parts :: Int,
-    total_cost :: Rational,
-    components :: [Part Rational],
-    payload_mass :: Rational
-}
-
-stage :: Rational -> Thruster Rational -> [Part Rational] -> Stage
-stage payload engine components = Stage {
-    engine = engine,
-    delta_v = delta_v,
-    stage_specific_implulse = stage_specific_implulse,
-    total_dry_mass = total_dry_mass,
-    total_capacity = total_capacity,
-    total_mass = total_mass,
-    total_parts = total_parts,
-    total_cost = total_cost,
-    components = components,
-    payload_mass = payload
-}
-    where
-        delta_v = log (fromRational total_mass/fromRational total_dry_mass) * (fromRational . engine_isp) engine * g
-        stage_specific_implulse = delta_v / log (fromRational total_mass / fromRational payload)
-        total_dry_mass = payload + (sum . map dry_mass) components
-        total_capacity = foldl (liftA2 (+)) zero_resource . map capacity $ components
-        total_mass = total_dry_mass + resource_density `dot` total_capacity
-        total_parts = length components
-        total_cost = resource_cost `dot` total_capacity + (sum . map dry_cost) components
-
-extend :: Part Rational -> Stage -> Stage
-extend p s = s' where s' = Stage {
-    engine = engine s,
-    delta_v = log ((fromRational . total_mass) s'/(fromRational . total_dry_mass) s') * (fromRational . engine_isp . engine) s' * g,
-    stage_specific_implulse = delta_v s' / log ((fromRational . total_mass) s' / (fromRational . payload_mass) s'),
-    total_dry_mass = total_dry_mass s + dry_mass p,
-    total_capacity = (+) <$> total_capacity s <*> capacity p,
-    total_mass = total_mass s + dry_mass p + resource_density `dot` capacity p,
-    total_parts = total_parts s + 1,
-    total_cost = total_cost s + dry_cost p + resource_cost `dot` capacity p,
-    components = p : components s,
-    payload_mass = payload_mass s
-}
-
--- If a part's asymetrical we have to add two of them the first time we add one.
-extend_symetric :: Part Rational -> Stage -> Stage
-extend_symetric p s =
-    if (asymetrical . geometry) p && notElem p (components s)
-    then (extend p . extend p) s
-    else extend p s
-
-
-stage_metric = stage_specific_implulse &&& Down . total_parts &&& Down . total_cost
-        
-increasingOn :: Ord b => (a -> b) -> [a] -> [a]
-increasingOn f (x : xs) = x : go (f x) xs
-    where
-        go best (x : xs) = 
-            if f x > best
-            then x : go (f x) xs
-            else go best xs
-        go _ [] = []
-increasingOn f [] = []
-        
-optimal_engine_stage :: Rational -> Part Rational -> [Part Rational] -> Stage
-optimal_engine_stage payload engine part_db = expand empty_stage parts []
-    where
-        -- s0 is the new best stage, or it would have been filtered out.
-        go :: Stage -> [([Part Rational], Stage)] -> Stage
-        go best_stage ((p0, s0) : ss) = expand s0 p0 ss
-        go best_stage []              = best_stage
-        
-        expand :: Stage -> [Part Rational] -> [([Part Rational], Stage)] -> Stage
-        expand best_stage parts ss = go best_stage sorted
-            where
-                increasing = increasingOn (stage_metric . snd) sorted
-                sorted = sortOn (expansion_order . snd) filtered
-                filtered = filter (\(_, s) -> stage_metric s > stage_metric best_stage) expanded
-                expanded = [(p, extend_symetric (head p) best_stage) | p <- (init . tails) parts] ++ ss
-                
-        expansion_order = total_dry_mass &&& Down . stage_metric
-
-        parts :: [Part Rational]
-        parts = sortOn (Down . dry_mass) . filter (fuels stage_thruster) $ part_db
-        
-        stage_thruster = (fromJust . thruster) engine
-        
-        empty_stage :: Stage
-        empty_stage = extend_symetric engine $ stage payload stage_thruster []
-
-        
-optimal_stage :: Rational -> [Part Rational] -> Stage
-optimal_stage payload part_db = head . sortOn (Down . stage_metric) $ engine_stages
-    where
-        engine_stages = [optimal_engine_stage payload engine part_db | engine <- engines]
-        engines = filter (isJust . thruster) part_db
-        
-optimal_stages' :: Rational -> [Part Rational] -> [Stage]
-optimal_stages' payload part_db = s0 : optimal_stages' (total_mass s0) part_db
-    where
-        s0 = optimal_stage payload part_db
-        
-optimal_stages :: Rational -> Rational -> [Part Rational] -> [Stage]
-optimal_stages payload mission_delta_v part_db = head . dropWhile ((< fromRational mission_delta_v) . sum . map delta_v) . inits $ optimal_stages' payload part_db
-        
-describe_stage s = do
-    putStrLn $ "    " ++ (show . fromRational . payload_mass) s ++ " ton payload"
-    putStrLn "    -------------"
-    
-    putStrLn $ "    delta-v    = " ++ show (delta_v s)
-    putStrLn $ "    engine-isp = " ++ show (g * (fromRational . engine_isp . engine) s)
-    putStrLn $ "    stage-isp  = " ++ show (stage_specific_implulse s)
-    putStrLn $ "    total mass = " ++ (show . fromRational . total_mass) s
-        
-    mapM_ (\g -> putStrLn $ "    " ++ (show . length) g ++ " " ++ head g) . group . map name $ components s
-    
-    putStrLn ""
-    
-describe_engine engine = do
-    putStrLn . name $ engine
-    -- let tanks = filter (fuels (fromJust $ thruster engine)) parts
-    -- mapM_ (putStrLn . ("  "++) . name) tanks
-    -- putStrLn ""
-    
-    let stage = optimal_engine_stage 0.1 engine parts
-    describe_stage stage
-
-
-main = do
-    let engines = filter (isJust . thruster) parts
-    mapM_ describe_engine engines
-    
-    let mission = optimal_stages 0.1 8000 . filter (radial_mount . geometry) $ parts
-    mapM_ describe_stage mission
