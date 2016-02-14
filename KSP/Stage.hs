@@ -11,22 +11,27 @@ import Data.Ord
 import Control.Applicative
 import Control.Arrow
 
+import Data.List.Decorate
 import Math.Linear
+import Math.Interpolation
+
+import qualified Engineering.Rocketry as Rocketry
 
 import KSP.Data.Bodies
+import KSP.Data.Environment
 import KSP.Data.Parts
 import KSP.Data.Resources
 
 fuels :: Thruster Rational -> Part Rational -> Bool
 fuels engine part = towards (propellant engine) (capacity part) && isNothing (thruster part)
 
+vac_isp = ($ 0) . piecewise_linear . isp
+engine_isp = vac_isp
 
-engine_isp = snd . head . isp
+mass_flow s = (vac_thrust . engine) s / (g * (vac_isp . engine) s)  -- kN / (m/s) = ton / s
 
 data Stage = Stage {
     engine :: Thruster Rational,
-    delta_v :: Double,
-    stage_specific_implulse :: Double,
     total_dry_mass :: Rational,
     total_capacity :: ResourceVector Rational,
     total_mass :: Rational,
@@ -36,11 +41,29 @@ data Stage = Stage {
     payload_mass :: Rational
 }
 
+
+data Evaluated s = Evaluated {
+    delta_v :: Double,
+    stage_specific_implulse :: Double,
+    evaluated_stage :: s
+}
+
+stage_delta_v :: Stage -> Double
+stage_delta_v s = log ((fromRational . total_mass) s/(fromRational . total_dry_mass) s) * (fromRational . engine_isp . engine) s * g
+
+evaluate :: (Stage -> Double) -> Stage -> Evaluated Stage
+evaluate dv s = Evaluated {
+    delta_v = delta_v,
+    stage_specific_implulse = stage_specific_implulse,
+    evaluated_stage = s
+}
+    where
+        delta_v = dv s
+        stage_specific_implulse = delta_v / log ((fromRational . total_mass) s / (fromRational . payload_mass) s)
+
 stage :: Rational -> Thruster Rational -> [Part Rational] -> Stage
 stage payload engine components = Stage {
     engine = engine,
-    delta_v = delta_v,
-    stage_specific_implulse = stage_specific_implulse,
     total_dry_mass = total_dry_mass,
     total_capacity = total_capacity,
     total_mass = total_mass,
@@ -50,8 +73,6 @@ stage payload engine components = Stage {
     payload_mass = payload
 }
     where
-        delta_v = log (fromRational total_mass/fromRational total_dry_mass) * (fromRational . engine_isp) engine * g
-        stage_specific_implulse = delta_v / log (fromRational total_mass / fromRational payload)
         total_dry_mass = payload + (sum . map dry_mass) components
         total_capacity = foldl (liftA2 (+)) zero_resource . map capacity $ components
         total_mass = total_dry_mass + resource_density `dot` total_capacity
@@ -61,8 +82,6 @@ stage payload engine components = Stage {
 extend :: Part Rational -> Stage -> Stage
 extend p s = s' where s' = Stage {
     engine = engine s,
-    delta_v = log ((fromRational . total_mass) s'/(fromRational . total_dry_mass) s') * (fromRational . engine_isp . engine) s' * g,
-    stage_specific_implulse = delta_v s' / log ((fromRational . total_mass) s' / (fromRational . payload_mass) s'),
     total_dry_mass = total_dry_mass s + dry_mass p,
     total_capacity = (+) <$> total_capacity s <*> capacity p,
     total_mass = total_mass s + dry_mass p + resource_density `dot` capacity p,
@@ -80,55 +99,71 @@ extend_symetric p s =
     else extend p s
 
 
-stage_metric = stage_specific_implulse &&& Down . total_parts &&& Down . total_cost
+stage_metric = stage_specific_implulse &&& Down . total_parts . evaluated_stage &&& Down . total_cost . evaluated_stage
+
         
-increasingOn :: Ord b => (a -> b) -> [a] -> [a]
-increasingOn f (x : xs) = x : go (f x) xs
-    where
-        go best (x : xs) = 
-            if f x > best
-            then x : go (f x) xs
-            else go best xs
-        go _ [] = []
-increasingOn f [] = []
-        
-optimal_engine_stage :: Rational -> Part Rational -> [Part Rational] -> Stage
-optimal_engine_stage payload engine part_db = expand empty_stage parts []
+optimal_engine_stage :: (Stage -> Double) -> [Part Rational] -> Rational -> Part Rational -> Evaluated Stage
+optimal_engine_stage dv part_db payload engine = expand empty_stage parts []
     where
         -- s0 is the new best stage, or it would have been filtered out.
-        go :: Stage -> [([Part Rational], Stage)] -> Stage
+        go :: Evaluated Stage -> [([Part Rational], Evaluated Stage)] -> Evaluated Stage
         go best_stage ((p0, s0) : ss) = expand s0 p0 ss
         go best_stage []              = best_stage
         
-        expand :: Stage -> [Part Rational] -> [([Part Rational], Stage)] -> Stage
+        expand :: Evaluated Stage -> [Part Rational] -> [([Part Rational], Evaluated Stage)] -> Evaluated Stage
         expand best_stage parts ss = go best_stage sorted
             where
                 increasing = increasingOn (stage_metric . snd) sorted
                 sorted = sortOn (expansion_order . snd) filtered
                 filtered = filter (\(_, s) -> stage_metric s > stage_metric best_stage) expanded
-                expanded = [(p, extend_symetric (head p) best_stage) | p <- (init . tails) parts] ++ ss
+                expanded = [(p, evaluate dv . extend_symetric (head p) . evaluated_stage $ best_stage) | p <- (init . tails) parts] ++ ss
                 
-        expansion_order = total_dry_mass &&& Down . stage_metric
+        expansion_order = total_dry_mass . evaluated_stage &&& Down . stage_metric
 
         parts :: [Part Rational]
         parts = sortOn (Down . dry_mass) . filter (fuels stage_thruster) $ part_db
         
         stage_thruster = (fromJust . thruster) engine
         
-        empty_stage :: Stage
-        empty_stage = extend_symetric engine $ stage payload stage_thruster []
-
+        empty_stage :: Evaluated Stage
+        empty_stage = evaluate dv . extend_symetric engine $ stage payload stage_thruster []
         
-optimal_stage :: Rational -> [Part Rational] -> Stage
-optimal_stage payload part_db = head . sortOn (Down . stage_metric) $ engine_stages
+optimal_stage :: (Rational -> Part Rational -> Evaluated Stage) -> [Part Rational] -> Rational -> Evaluated Stage
+optimal_stage optimal_engine_stage part_db payload = head . sortOn (Down . stage_metric) $ engine_stages
     where
-        engine_stages = [optimal_engine_stage payload engine part_db | engine <- engines]
+        engine_stages = map (optimal_engine_stage payload) engines
         engines = filter (isJust . thruster) part_db
-        
-optimal_stages' :: Rational -> [Part Rational] -> [Stage]
-optimal_stages' payload part_db = s0 : optimal_stages' (total_mass s0) part_db
+
+optimal_stages' :: (Rational -> Evaluated Stage) -> Rational -> [Evaluated Stage]
+optimal_stages' optimal_stage = go
     where
-        s0 = optimal_stage payload part_db
-        
-optimal_stages :: Rational -> Rational -> [Part Rational] -> [Stage]
-optimal_stages payload mission_delta_v part_db = head . dropWhile ((< fromRational mission_delta_v) . sum . map delta_v) . inits $ optimal_stages' payload part_db
+        go payload = s0 : (go . total_mass . evaluated_stage) s0
+            where
+                s0 = optimal_stage payload
+
+optimal_stages :: (Stage -> Double) -> [Part Rational] -> Rational -> Rational -> [Evaluated Stage]
+optimal_stages dv part_db payload mission_delta_v = head . dropWhile ((< fromRational mission_delta_v) . sum . map delta_v) . inits $ optimal_stages' os payload
+    where
+        os = optimal_stage oes part_db
+        oes = optimal_engine_stage dv part_db
+
+convert_stage :: Stage -> Rocketry.Stage (Environment Rational)
+convert_stage s = Rocketry.Stage {
+    Rocketry.initial_mass = total_dry_mass s,
+    Rocketry.final_mass = total_mass s,
+    Rocketry.isp = fromRational . (*g) . piecewise_linear (isp $ engine s) . atmospheric_pressure,
+    Rocketry.mass_flow = const . fromRational $ mass_flow s
+}
+
+optimal_mission_stages :: [Part Rational] -> Rational -> [Rocketry.Maneuver (Environment Rational)] -> [Evaluated Stage]
+optimal_mission_stages part_db = go
+    where
+        go _ [] = []
+        go payload maneuvers =
+            if delta_v s <= 0
+            then []
+            else s : go (total_mass . evaluated_stage $ s) (Rocketry.after maneuvers . delta_v $ s)
+            where
+                dv = Rocketry.evaluate_stage maneuvers . convert_stage
+                oes = optimal_engine_stage dv part_db
+                s = optimal_stage oes part_db payload

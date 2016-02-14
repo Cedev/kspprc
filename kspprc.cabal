@@ -18,7 +18,8 @@ cabal-version:       >=1.10
 executable kspprc
   main-is:             KSP/Demo.hs
   -- other-modules:       
-  other-extensions:    DeriveFunctor, DeriveFoldable, DeriveTraversable
-  build-depends:       base >=4.8 && <4.9
+  other-extensions:    DeriveFunctor, DeriveFoldable, DeriveTraversable, TypeFamilies
+  build-depends:       base >=4.8 && <4.9,
+                       ad
   -- hs-source-dirs:      
   default-language:    Haskell2010
