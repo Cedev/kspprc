@@ -98,6 +98,16 @@ extend_symetric p s =
     then (extend p . extend p) s
     else extend p s
 
+{- marginal stage specific impulse is
+    delta_v now - delta_v before
+    ----------------------------
+     log (mass now/mass before)
+
+    as long as the marginal stage specific impulse is better than the
+    specific impulse of the best possible stage in the current environment
+    it's probably better to keep extending the current stage
+-}
+
 
 stage_metric = stage_specific_implulse &&& Down . total_parts . evaluated_stage &&& Down . total_cost . evaluated_stage
 
@@ -164,6 +174,6 @@ optimal_mission_stages part_db = go
             then []
             else s : go (total_mass . evaluated_stage $ s) (Rocketry.after maneuvers . delta_v $ s)
             where
-                dv = Rocketry.evaluate_stage maneuvers . convert_stage
+                dv = Rocketry.stage_delta_v . Rocketry.evaluate_stage maneuvers . convert_stage
                 oes = optimal_engine_stage dv part_db
                 s = optimal_stage oes part_db payload

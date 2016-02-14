@@ -24,7 +24,7 @@ describe_stage e = do
     putStrLn $ "    stage-isp  = " ++ show (stage_specific_implulse e) ++ " m/s"
     putStrLn $ "    total mass = " ++ (show . fromRational . total_mass) s ++ " ton"
     putStrLn $ "    dry mass   = " ++ (show . fromRational . total_dry_mass) s ++ " ton"
-    putStrLn $ "    mass flow  = " ++ (show . fromRational . mass_flow) s ++ " ton/s"
+    putStrLn $ "    mass flow  = " ++ (show . fromRational . (*1000) . mass_flow) s ++ " kg/s"
     putStrLn $ "    burn time  = " ++ (show . fromRational) ((total_mass s - total_dry_mass s)/mass_flow s) ++ " s"
         
     mapM_ (\g -> putStrLn $ "    " ++ (show . length) g ++ " " ++ head g) . group . map name $ components s
@@ -49,7 +49,7 @@ main = do
     let mission_profile = [
             Rocketry.Maneuver {Rocketry.delta_v = 6000, Rocketry.gravity=0, Rocketry.environment=space},
             Rocketry.Maneuver {Rocketry.delta_v = 4000, Rocketry.gravity=g, Rocketry.environment=Environment 1}]
-        dv = Rocketry.evaluate_stage mission_profile . convert_stage
+        dv = Rocketry.stage_delta_v . Rocketry.evaluate_stage mission_profile . convert_stage
         mission_parts = filter (radial_mount . geometry) parts
         mission = optimal_stages dv parts 0.1 20000
         mission' = optimal_mission_stages parts 0.1 mission_profile

@@ -18,27 +18,24 @@ data Maneuver e = Maneuver {
     environment :: e
 }
 
-{-
-data StageEvaluation e = SE {
-    overall_delta_v :: Double,
-    overall_gravity_delta_v :: Double,
-    overall_burn_time :: Double,
+data StageEvaluation e = StageEvaluation {
+    stage_delta_v :: Double,
+    stage_gravity_delta_v :: Double,
+    stage_burn_time :: Double,
     stage_specific_impulse :: Double,
     maneuvers :: [ManeuverEvaluation e]
 }
 
-data ManeuverEvaluation e = ME {
+data ManeuverEvaluation e = ManeuverEvaluation {
     maneuver :: Maneuver e,
-    delta_v :: Double,
-    gravity_delta_v :: Double,
-    burn_time :: Double,
-    isp :: Double,
-    mass_flow :: Double,
-    initial_mass :: Double,
-    final_mass :: Double,
-    ejected_mass :: Double
+    maneuver_gravity_delta_v :: Double,
+    maneuver_burn_time :: Double,
+    maneuver_isp :: Double,
+    maneuver_mass_flow :: Double,
+    maneuver_initial_mass :: Double,
+    maneuver_final_mass :: Double,
+    maneuver_ejected_mass :: Double
 }
--}
 
 {-
 Compensation for gravity
@@ -75,22 +72,60 @@ after (maneuver : ms) dv =
     then after ms (dv - delta_v maneuver)
     else maneuver {delta_v = delta_v maneuver - dv} : ms
 
-evaluate_stage :: [Maneuver e] -> Stage e -> Double
-evaluate_stage maneuvers stage = go maneuvers 0
+stage_evaluation :: Stage e -> [ManeuverEvaluation e] -> StageEvaluation e
+stage_evaluation s ms = StageEvaluation {
+    stage_delta_v          = stage_delta_v,
+    stage_gravity_delta_v  = sum . map maneuver_gravity_delta_v $ ms,
+    stage_burn_time        = sum . map maneuver_burn_time $ ms,
+    stage_specific_impulse = stage_delta_v / log ((fromRational . initial_mass) s/(fromRational . final_mass) s),
+    maneuvers = ms
+}
     where
-        go [] _ = 0
+        stage_delta_v = sum . map (delta_v . maneuver) $ ms
+
+evaluate_stage :: [Maneuver e] -> Stage e -> StageEvaluation e
+evaluate_stage maneuvers stage = stage_evaluation stage $ go maneuvers 0
+    where
+        go [] _ = []
         go (maneuver : ms) ejected_mass =
             if available_delta_v <= delta_v maneuver
-            then available_delta_v
-            else delta_v maneuver + go ms (ejected_mass + maneuver_ejected_mass)
+            then [ManeuverEvaluation {
+                    maneuver = maneuver {delta_v = dv available_ejected_mass},
+                    maneuver_gravity_delta_v = gravity_dv available_ejected_mass,
+                    maneuver_burn_time       = burn_time  available_ejected_mass,
+                    maneuver_isp          = maneuver_isp,
+                    maneuver_mass_flow    = maneuver_mass_flow,
+                    maneuver_initial_mass = maneuver_initial_mass,
+                    maneuver_final_mass   = available_final_mass,
+                    maneuver_ejected_mass = available_ejected_mass
+                }]
+            else ManeuverEvaluation {
+                    maneuver = maneuver,
+                    maneuver_gravity_delta_v = gravity_dv maneuver_ejected_mass,
+                    maneuver_burn_time       = burn_time  maneuver_ejected_mass,
+                    maneuver_isp          = maneuver_isp,
+                    maneuver_mass_flow    = maneuver_mass_flow,
+                    maneuver_initial_mass = maneuver_initial_mass,
+                    maneuver_final_mass   = maneuver_initial_mass + maneuver_ejected_mass,
+                    maneuver_ejected_mass = maneuver_ejected_mass
+                } : go ms (ejected_mass + maneuver_ejected_mass)
             where
                 env = environment maneuver
                 maneuver_isp = isp stage env
                 maneuver_mass_flow = mass_flow stage env
                 maneuver_initial_mass = (fromRational . initial_mass) stage + ejected_mass
                 available_final_mass = (fromRational . final_mass) stage
+                available_ejected_mass = available_final_mass - maneuver_initial_mass
+
+                burn_time :: (Scalar t ~ Double, Mode t, Floating t) => t -> t
+                burn_time em = em/auto maneuver_mass_flow
+
+                gravity_dv :: (Scalar t ~ Double, Mode t, Floating t) => t -> t
+                gravity_dv em = (auto $ gravity maneuver)*burn_time em
+
                 dv :: (Scalar t ~ Double, Mode t, Floating t) => t -> t
-                dv = \em -> auto maneuver_isp * log ((auto maneuver_initial_mass+em)/auto maneuver_initial_mass) - (auto $ gravity maneuver)*em/auto maneuver_mass_flow
-                available_delta_v = dv (available_final_mass - maneuver_initial_mass)
-                em_dv =  last . take 64 . inverse dv 0
-                maneuver_ejected_mass = em_dv (delta_v maneuver)
+                dv em = auto maneuver_isp * log ((auto maneuver_initial_mass+em)/auto maneuver_initial_mass) - gravity_dv em
+
+                available_delta_v = dv available_ejected_mass
+                inv_dv =  last . take 64 . inverse dv 0
+                maneuver_ejected_mass = inv_dv (delta_v maneuver)
