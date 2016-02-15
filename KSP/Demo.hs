@@ -50,5 +50,5 @@ main = do
     let mission_profile = [
             Rocketry.Maneuver {Rocketry.delta_v = 6000, Rocketry.gravity=0, Rocketry.environment=space},
             Rocketry.Maneuver {Rocketry.delta_v = 4000, Rocketry.gravity=g, Rocketry.environment=Environment 1}]
-        mission' = optimal_mission_stages parts 0.1 mission_profile
+        mission' = shifted_mission_stages parts 0.1 mission_profile
     mapM_ describe_stage mission'

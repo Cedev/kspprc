@@ -76,6 +76,11 @@ if a manuever requires less delta-v than the stage provides
     the stage delta-v is the sum of the completed delta-vs for all maneuvers the stage is used for
 -}
 
+infinity = encodeFloat (floatRadix 0 - 1) (snd $ floatRange 0)
+
+forever :: Maneuver e -> Maneuver e
+forever m = m {delta_v = infinity}
+
 after :: [Maneuver e] -> Double -> [Maneuver e]
 after ms dv | dv <= 0 = ms
 after [] _ = []
