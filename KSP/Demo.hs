@@ -13,15 +13,16 @@ import KSP.Data.Environment
 import KSP.Data.Parts
 
 
-describe_stage e = do
-    let s = evaluated_stage e
+describe_stage es = do
+    let s = evaluated_stage es
+        e = evaluation es
 
     putStrLn $ "    " ++ (show . fromRational . payload_mass) s ++ " ton payload"
     putStrLn "    -------------"
     
-    putStrLn $ "    delta-v    = " ++ show (delta_v e) ++ " m/s"
+    putStrLn $ "    delta-v    = " ++ show (Rocketry.stage_delta_v e) ++ " m/s"
     putStrLn $ "    engine-isp = " ++ show (g * (fromRational . engine_isp . engine) s) ++ " m/s"
-    putStrLn $ "    stage-isp  = " ++ show (stage_specific_implulse e) ++ " m/s"
+    putStrLn $ "    stage-isp  = " ++ show (Rocketry.stage_specific_impulse e) ++ " m/s"
     putStrLn $ "    total mass = " ++ (show . fromRational . total_mass) s ++ " ton"
     putStrLn $ "    dry mass   = " ++ (show . fromRational . total_dry_mass) s ++ " ton"
     putStrLn $ "    mass flow  = " ++ (show . fromRational . (*1000) . mass_flow) s ++ " kg/s"
@@ -30,16 +31,16 @@ describe_stage e = do
     mapM_ (\g -> putStrLn $ "    " ++ (show . length) g ++ " " ++ head g) . group . map name $ components s
     
     putStrLn ""
-    
-describe_engine engine = do
-    putStrLn . name $ engine
-    -- let tanks = filter (fuels (fromJust $ thruster engine)) parts
-    -- mapM_ (putStrLn . ("  "++) . name) tanks
-    -- putStrLn ""
-    
-    let stage = optimal_engine_stage stage_delta_v parts 0.1 engine
-    describe_stage stage
 
+describe_engine engine = do
+    return ()
+
+    {-
+    putStrLn . name $ engine
+    let tanks = filter (fuels (fromJust $ thruster engine)) parts
+    mapM_ (putStrLn . ("  "++) . name) tanks
+    putStrLn ""
+    -}
 
 main = do
     let engines = filter (isJust . thruster) parts
@@ -49,8 +50,5 @@ main = do
     let mission_profile = [
             Rocketry.Maneuver {Rocketry.delta_v = 6000, Rocketry.gravity=0, Rocketry.environment=space},
             Rocketry.Maneuver {Rocketry.delta_v = 4000, Rocketry.gravity=g, Rocketry.environment=Environment 1}]
-        dv = Rocketry.stage_delta_v . Rocketry.evaluate_stage mission_profile . convert_stage
-        mission_parts = filter (radial_mount . geometry) parts
-        mission = optimal_stages dv parts 0.1 20000
         mission' = optimal_mission_stages parts 0.1 mission_profile
     mapM_ describe_stage mission'
