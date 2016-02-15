@@ -7,11 +7,12 @@ import Math.Interpolation
 
 import qualified Engineering.Rocketry as Rocketry
 
-import KSP.Stage
 import KSP.Data.Bodies
 import KSP.Data.Environment
 import KSP.Data.Parts
 
+import KSP.Calculator
+import KSP.Stage
 
 describe_stage es = do
     let s = evaluated_stage es
@@ -50,5 +51,5 @@ main = do
     let mission_profile = [
             Rocketry.Maneuver {Rocketry.delta_v = 6000, Rocketry.gravity=0, Rocketry.environment=space},
             Rocketry.Maneuver {Rocketry.delta_v = 4000, Rocketry.gravity=g, Rocketry.environment=Environment 1}]
-        mission' = shifted_mission_stages parts 0.1 mission_profile
+        mission' = shifted_mission_stages 2 parts 0.1 mission_profile
     mapM_ describe_stage mission'

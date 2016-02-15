@@ -25,7 +25,7 @@ data Maneuver e = Maneuver {
     delta_v :: Double,
     gravity :: Double,
     environment :: e
-}
+} deriving (Eq, Show, Read)
 
 data StageEvaluation e = StageEvaluation {
     stage_delta_v :: Double,
@@ -36,7 +36,7 @@ data StageEvaluation e = StageEvaluation {
     stage_total_mass :: Double,
     stage_dry_mass :: Double,
     maneuvers :: [ManeuverEvaluation e]
-}
+} deriving (Eq, Show, Read)
 
 data ManeuverEvaluation e = ManeuverEvaluation {
     maneuver :: Maneuver e,
@@ -47,7 +47,7 @@ data ManeuverEvaluation e = ManeuverEvaluation {
     maneuver_total_mass :: Double,
     maneuver_dry_mass :: Double,
     maneuver_ejected_mass :: Double
-}
+} deriving (Eq, Show, Read)
 
 {-
 Compensation for gravity

@@ -13,8 +13,21 @@ data Part v = Part {
     dry_mass :: v, -- tons
     capacity :: ResourceVector v, -- units
     geometry :: Geometry,
-    thruster :: Maybe (Thruster v)
+    thruster :: Maybe (Thruster v),
+    decouples :: Bool
 } deriving (Eq, Show, Read)
+
+-- The nothing part
+part :: Num v => Part v
+part = Part {
+    name = [],
+    dry_cost = 0,
+    dry_mass = 0,
+    capacity = zero_resource,
+    geometry = symetric [] [],
+    thruster = Nothing,
+    decouples = False
+}
 
 -- propellants
 lfo :: Fractional a => ResourceVector a
@@ -90,13 +103,12 @@ aconic :: Size -> Size -> Geometry
 aconic top bottom = (conic top bottom) {asymetrical = True}
 
 tank :: Fractional v => String -> Geometry -> v -> v -> ResourceVector v -> Part v
-tank name geom cost mass capacity = Part {
+tank name geom cost mass capacity = part {
     name = name,
     dry_cost = cost - capacity `dot` resource_cost,
     dry_mass = mass,
     capacity = capacity,
-    geometry = geom,
-    thruster = Nothing
+    geometry = geom
 }
 
 rocket_tank :: Fractional v => String -> Geometry -> v -> v -> v -> v -> Part v
@@ -118,7 +130,7 @@ battery :: Fractional v => String -> Geometry -> v -> v -> v -> Part v
 battery name geom cost mass capacity = tank name geom cost mass $ zero_resource {electric_charge = capacity}
 
 liquid_booster :: Fractional v => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> ResourceVector v -> Part v
-liquid_booster name geom cost mass vac_thrust isp gimbal capacity = Part {
+liquid_booster name geom cost mass vac_thrust isp gimbal capacity = part {
     name = name,
     dry_cost = cost - capacity `dot` resource_cost,
     dry_mass = mass,
@@ -137,7 +149,7 @@ liquid_engine :: Fractional v => String -> Geometry -> v -> v -> v -> PiecewiseL
 liquid_engine name geom cost mass vac_thrust isp gimbal = liquid_booster name geom cost mass vac_thrust isp gimbal zero_resource
 
 solid_booster :: Fractional v => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> Part v
-solid_booster name geom cost mass vac_thrust isp fuel = Part {
+solid_booster name geom cost mass vac_thrust isp fuel = part {
     name = name,
     dry_cost = cost - capacity `dot` resource_cost,
     dry_mass = mass,
@@ -152,6 +164,15 @@ solid_booster name geom cost mass vac_thrust isp fuel = Part {
     })
 }
     where capacity = zero_resource { solid_fuel = fuel }
+
+decoupler :: Num v => String -> Geometry -> v -> v -> Part v
+decoupler name geom cost mass = part {
+    name = name,
+    dry_cost = cost,
+    dry_mass = mass,
+    geometry = geom,
+    decouples = True
+}
 
 parts :: Fractional v => [Part v]
 parts = [
@@ -258,7 +279,7 @@ parts = [
         },
     
     -- puff
-    Part {
+    part {
         name = "O-10 \"Puff\" MonoPropellant Fuel Engine",
         dry_cost = 150,
         dry_mass = 0.09,
@@ -274,7 +295,7 @@ parts = [
     },
     
     -- lv-n
-    Part {
+    part {
         name = "LV-N \"Nerv\" Atomic Rocket Motor",
         dry_cost = 10000,
         dry_mass = 3,
@@ -290,7 +311,7 @@ parts = [
     },
     
     -- dawn
-    Part {
+    part {
         name = "IX-6315 \"Dawn\" Electric Propulsion System",
         dry_cost = 8000,
         dry_mass = 0.25,
@@ -311,6 +332,19 @@ parts = [
     solid_booster "RT-10 \"Hammer\" Solid Fuel Booster"          small  400 0.75 227 [(0, 195), (1, 170), (7, 0.001)]  375,
     solid_booster "BACC \"Thumper\" Solid Fuel Booster"          small  850 1.5  300 [(0, 210), (1, 175), (6, 0.001)]  820,
     solid_booster "S1 SRB-KD25k \"Kickback\" Solid Fuel Booster" small 2700 4.5  670 [(0, 220), (1, 195), (7, 0.001)] 2600,
-    solid_booster "Launch Escape System"         (symetric [] [Small]) 1000 0.9  750 [(0, 180), (1, 160), (8, 0.001)]   30
+    solid_booster "Launch Escape System"         (symetric [] [Small]) 1000 0.9  750 [(0, 180), (1, 160), (8, 0.001)]   30,
     
+    -- decouplers
+    decoupler "TT-38K Radial Decoupler"       radial 600 0.025,
+    decoupler "TT-70 Radial Decoupler"        radial 700 0.05,
+    decoupler "Hydraulic Detachment Manifold" radial 770 0.4,
+    decoupler "Small Hardpoint"               radial  60 0.05,
+    decoupler "Structural Pylon"              radial 125 0.2,
+    decoupler "TR-2V Stack Decoupler"           tiny 300 0.015,
+    decoupler "TR-2C Stack Separator"           tiny 450 0.02,
+    decoupler "TR-18A Stack Decoupler"         small 400 0.05,
+    decoupler "TR-18D Stack Separator"         small 600 0.075,
+    decoupler "Rockomax Brand Decoupler"       large 550 0.4,
+    decoupler "TR-XL Stack Separator"          large 900 0.45,
+    decoupler "TR-38-D"                       xlarge 600 0.8
     ]
