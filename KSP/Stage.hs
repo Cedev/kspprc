@@ -4,6 +4,9 @@ import Prelude hiding (sum, mapM_)
 
 import Data.Foldable
 
+import Data.Maybe
+import Data.Monoid
+
 import Control.Applicative
 
 import Math.Linear
@@ -22,9 +25,9 @@ data Stage = Stage {
     payload_mass :: Rational
 } deriving (Eq, Show, Read)
 
-stage :: Rational -> Thruster Rational -> [Part Rational] -> Stage
-stage payload engine components = Stage {
-    engine = engine,
+stage :: Rational -> [Part Rational] -> Stage
+stage payload components = Stage {
+    engine = mconcat . catMaybes . map thruster $ components,
     total_dry_mass = total_dry_mass,
     total_capacity = total_capacity,
     total_mass = total_mass,
@@ -42,7 +45,7 @@ stage payload engine components = Stage {
 
 extend :: Part Rational -> Stage -> Stage
 extend p s = s' where s' = Stage {
-    engine = engine s,
+    engine = maybe (engine s) (<> engine s) (thruster p),
     total_dry_mass = total_dry_mass s + dry_mass p,
     total_capacity = (+) <$> total_capacity s <*> capacity p,
     total_mass = total_mass s + dry_mass p + resource_density `dot` capacity p,

@@ -5,6 +5,7 @@ import Data.Maybe
 import Math.Linear
 import Math.Interpolation
 
+import KSP.Data.Bodies
 import KSP.Data.Resources
 
 data Part v = Part {
@@ -49,16 +50,48 @@ rcs = zero_resource {monopropellant = 1}
 -- isp_current = isp_vac - min(p,1) * (isp_vac - isp_atm) where p = pressure in atmospheres
 -- https://www.reddit.com/r/KerbalAcademy/comments/1mmuyz/specific_impulse_and_atmospheric_cutoff/
 
-
 data Thruster v = Thruster {
     vac_thrust :: v, -- kN
     propellant :: ResourceVector v, -- units (ratio)
     isp :: PiecewiseLinear v, -- atmospheric pressure -> isp in seconds
     throttleable :: Bool,
-    gimbal :: v
+    gimbal :: v,
+    mass_flow :: v -- kN / (m/s) = ton / s
 } deriving (Eq, Show, Read)
 
+vac_isp :: (Ord v, Fractional v) => Thruster v -> v
+vac_isp = ($ 0) . piecewise_linear . isp
+
 -- max_flow (kg/s) = max_thrust / (g * isp)
+
+vac_flow :: (Ord v, Fractional v) => v -> PiecewiseLinear v -> v
+vac_flow vac_thrust isp = vac_thrust/(g * piecewise_linear isp 0)
+
+instance (Ord v, Fractional v) => Monoid (Thruster v) where
+    mempty = Thruster {
+        vac_thrust = 0,
+        propellant = zero_resource,
+        isp = [],
+        throttleable = False,
+        gimbal = 0,
+        mass_flow = 0
+    }
+
+    Thruster {mass_flow=0} `mappend` y = y
+    x `mappend` Thruster {mass_flow=0} = x
+    x `mappend` y = Thruster {
+        vac_thrust = total_thrust,
+        propellant = (+) <$> ((x_ratio*) <$> propellant x) <*> ((y_ratio*) <$> propellant y),
+        isp = x_ratio *~ isp x ~+~ y_ratio *~ isp y,
+        throttleable = throttleable x && throttleable y,
+        gimbal = (vac_thrust x * gimbal x + vac_thrust y * gimbal y)/total_thrust, -- only an approximation
+        mass_flow = total_mass_flow
+    }
+        where
+            total_thrust = vac_thrust x + vac_thrust y
+            total_mass_flow = mass_flow x + mass_flow y
+            x_ratio = mass_flow x/total_mass_flow
+            y_ratio = mass_flow y/total_mass_flow
 
 data Size = Tiny | Small | Mk1 | Mk2 | Large | Mk3 | ExtraLarge deriving (Eq, Ord, Show, Read)
 
@@ -129,7 +162,7 @@ ore_tank name geom cost mass capacity = tank name geom cost mass $ zero_resource
 battery :: Fractional v => String -> Geometry -> v -> v -> v -> Part v
 battery name geom cost mass capacity = tank name geom cost mass $ zero_resource {electric_charge = capacity}
 
-liquid_booster :: Fractional v => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> ResourceVector v -> Part v
+liquid_booster :: (Ord v, Fractional v) => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> ResourceVector v -> Part v
 liquid_booster name geom cost mass vac_thrust isp gimbal capacity = part {
     name = name,
     dry_cost = cost - capacity `dot` resource_cost,
@@ -141,14 +174,15 @@ liquid_booster name geom cost mass vac_thrust isp gimbal capacity = part {
         propellant = lfo,
         isp = isp,
         throttleable = True,
-        gimbal = gimbal
+        gimbal = gimbal,
+        mass_flow = vac_flow vac_thrust isp
     })
 }
 
-liquid_engine :: Fractional v => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> Part v
+liquid_engine :: (Ord v, Fractional v) => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> Part v
 liquid_engine name geom cost mass vac_thrust isp gimbal = liquid_booster name geom cost mass vac_thrust isp gimbal zero_resource
 
-solid_booster :: Fractional v => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> Part v
+solid_booster :: (Ord v, Fractional v) => String -> Geometry -> v -> v -> v -> PiecewiseLinear v -> v -> Part v
 solid_booster name geom cost mass vac_thrust isp fuel = part {
     name = name,
     dry_cost = cost - capacity `dot` resource_cost,
@@ -160,10 +194,21 @@ solid_booster name geom cost mass vac_thrust isp fuel = part {
         propellant = sf,
         isp = isp,
         throttleable = False,
-        gimbal = 0
+        gimbal = 0,
+        mass_flow = vac_flow vac_thrust isp
     })
 }
     where capacity = zero_resource { solid_fuel = fuel }
+
+precalculate :: (Ord v, Fractional v) => v -> ResourceVector v -> PiecewiseLinear v -> Bool -> v -> Maybe (Thruster v)
+precalculate vac_thrust propellant isp throttleable gimbal = Just $ Thruster {
+    vac_thrust = vac_thrust,
+    propellant = propellant,
+    isp = isp,
+    throttleable = throttleable,
+    gimbal = gimbal,
+    mass_flow = vac_flow vac_thrust isp
+}
 
 decoupler :: Num v => String -> Geometry -> v -> v -> Part v
 decoupler name geom cost mass = part {
@@ -174,7 +219,7 @@ decoupler name geom cost mass = part {
     decouples = True
 }
 
-parts :: Fractional v => [Part v]
+parts :: (Ord v, Fractional v) => [Part v]
 parts = [
     -- rocket fuel tanks
     rocket_tank "Oscar-B Fuel Tank"             tiny    70 0.025    18   22,
@@ -285,13 +330,7 @@ parts = [
         dry_mass = 0.09,
         capacity = zero_resource,
         geometry = radial,
-        thruster = Just (Thruster {
-            vac_thrust = 20,
-            propellant = rcs,
-            isp = [(0, 250), (1, 120), (4, 0.001)],
-            throttleable = True,
-            gimbal = 0
-        })
+        thruster = precalculate 20 rcs [(0, 250), (1, 120), (4, 0.001)] True 0
     },
     
     -- lv-n
@@ -301,13 +340,7 @@ parts = [
         dry_mass = 3,
         capacity = zero_resource,
         geometry = small,
-        thruster = Just (Thruster {
-            vac_thrust = 60,
-            propellant = lf,
-            isp = [(0, 800), (1, 185), (2, 0.001)],
-            throttleable = True,
-            gimbal = 0
-        })
+        thruster = precalculate 60 lf [(0, 800), (1, 185), (2, 0.001)] True 0
     },
     
     -- dawn
@@ -317,13 +350,7 @@ parts = [
         dry_mass = 0.25,
         capacity = zero_resource,
         geometry = tiny,
-        thruster = Just (Thruster {
-            vac_thrust = 2,
-            propellant = xe,
-            isp = [(0, 4200), (1, 100), (1.2, 0.001)],
-            throttleable = True,
-            gimbal = 0
-        })
+        thruster = precalculate 2 xe [(0, 4200), (1, 100), (1.2, 0.001)] True 0
     },
     
     -- solid boosters
