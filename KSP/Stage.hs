@@ -9,48 +9,84 @@ import Data.Monoid
 
 import Control.Applicative
 
+import qualified Data.Map.Strict as Map
+
 import Math.Linear
 
 import KSP.Data.Parts
 import KSP.Data.Resources
+
+type Bag a = Map.Map a 
 
 data Stage = Stage {
     engine :: Thruster Rational,
     total_dry_mass :: Rational,
     total_capacity :: ResourceVector Rational,
     total_mass :: Rational,
-    total_parts :: Int,
+    total_parts :: Integer,
     total_cost :: Rational,
-    components :: [Part Rational],
+    components :: Map.Map (Part Rational) Integer,
     payload_mass :: Rational
-} deriving (Eq, Show, Read)
+} deriving (Eq, Ord, Show, Read)
 
-stage :: Rational -> [Part Rational] -> Stage
-stage payload components = Stage {
-    engine = mconcat . catMaybes . map thruster $ components,
-    total_dry_mass = total_dry_mass,
-    total_capacity = total_capacity,
-    total_mass = total_mass,
-    total_parts = total_parts,
-    total_cost = total_cost,
-    components = components,
+instance Monoid Stage where
+    mempty = Stage {
+        engine         = mempty,
+        total_dry_mass = 0,
+        total_capacity = zero,
+        total_mass     = 0,
+        total_parts    = 0,
+        total_cost     = 0,
+        components     = Map.empty,
+        payload_mass   = 0
+    }
+
+    x `mappend` y = Stage {
+        engine         = engine x         <>  engine y,
+        total_dry_mass = total_dry_mass x +   total_dry_mass y,
+        total_capacity = total_capacity x ^+^ total_capacity y,
+        total_mass     = total_mass x     +   total_mass y,
+        total_parts    = total_parts x    +   total_parts y,
+        total_cost     = total_cost x     +   total_cost y,
+        components = Map.unionWith (+) (components x) (components y),
+        payload_mass   = payload_mass x   +   payload_mass y
+    }
+
+quantities = Map.toList
+
+filter_components :: (k -> Bool) -> Map.Map k a -> Map.Map k a
+filter_components f = Map.filterWithKey (const . f)
+
+scale :: Num n => (n -> a -> b) -> (k -> a) -> Map.Map k Integer -> [b]
+scale scale_by f = map (\(k, v) -> scale_by (fromIntegral v) (f k)) . Map.toList
+
+stuff :: (Ord k, Num n) => n -> k -> Map.Map k n -> Map.Map k n
+stuff n k = Map.insertWith (+) k n
+
+empty_stage :: Rational -> Stage
+empty_stage payload = mempty {
+    total_dry_mass = payload,
+    total_mass = payload,
     payload_mass = payload
 }
-    where
-        total_dry_mass = payload + (sum . map dry_mass) components
-        total_capacity = foldl (liftA2 (+)) zero_resource . map capacity $ components
-        total_mass = total_dry_mass + resource_density `dot` total_capacity
-        total_parts = length components
-        total_cost = resource_cost `dot` total_capacity + (sum . map dry_cost) components
 
-extend :: Part Rational -> Stage -> Stage
-extend p s = s' where s' = Stage {
-    engine = maybe (engine s) (<> engine s) (thruster p),
-    total_dry_mass = total_dry_mass s + dry_mass p,
-    total_capacity = (+) <$> total_capacity s <*> capacity p,
-    total_mass = total_mass s + dry_mass p + resource_density `dot` capacity p,
-    total_parts = total_parts s + 1,
-    total_cost = total_cost s + dry_cost p + resource_cost `dot` capacity p,
-    components = p : components s,
-    payload_mass = payload_mass s
+stage :: Rational -> [Part Rational] -> Stage
+stage payload = mconcat . (empty_stage payload :) . map (part_stage 1)
+
+part_stage :: Integer -> Part Rational -> Stage
+part_stage n p = Stage {
+    engine = maybe mempty (thruster_cluster n') $ thruster p,
+    total_dry_mass = n' * dry_mass p,
+    total_capacity = n' *^ capacity p,
+    total_mass     = n' * dry_mass p + resource_density `dot` new_capacity,
+    total_parts    = n,
+    total_cost     = n' * dry_cost p + resource_cost `dot` new_capacity,
+    components     = Map.singleton p n,
+    payload_mass   = 0
 }
+    where
+        n' = fromIntegral n
+        new_capacity = n' *^ capacity p
+
+extend :: Integer -> Part Rational -> Stage -> Stage
+extend n p s = part_stage n p <> s

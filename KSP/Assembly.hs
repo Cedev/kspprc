@@ -2,6 +2,8 @@ module KSP.Assembly where
 
 import Data.Maybe
 
+import qualified Data.Map.Strict as Map
+
 import Math.Linear
 
 import KSP.Data.Parts
@@ -19,9 +21,9 @@ fuels engine part = towards (propellant engine) (capacity part) && isNothing (th
 -- If a part's asymetrical we have to add two of them the first time we add one.
 extend_symetric :: Part Rational -> Stage -> Stage
 extend_symetric p s =
-    if (asymetrical . geometry) p && notElem p (components s)
-    then (extend p . extend p) s
-    else extend p s
+    if (asymetrical . geometry) p && Map.notMember p (components s)
+    then extend 2 p s
+    else extend 1 p s
 
 data StageAssembly = StageAssembly {
     get_stage :: EvaluatedStage,

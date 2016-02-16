@@ -17,7 +17,7 @@ data ResourceVector v = ResourceVector {
     xenon :: v,
     ore :: v,
     ablator :: v
-} deriving (Eq, Show, Read, Functor, Foldable, Traversable)
+} deriving (Eq, Show, Read, Ord, Functor, Foldable, Traversable)
 
 instance Applicative ResourceVector where
     pure a = ResourceVector a a a a a a a a a

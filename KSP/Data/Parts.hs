@@ -16,7 +16,7 @@ data Part v = Part {
     geometry :: Geometry,
     thruster :: Maybe (Thruster v),
     decouples :: Bool
-} deriving (Eq, Show, Read)
+} deriving (Eq, Ord, Show, Read)
 
 -- The nothing part
 part :: Num v => Part v
@@ -57,7 +57,7 @@ data Thruster v = Thruster {
     throttleable :: Bool,
     gimbal :: v,
     mass_flow :: v -- kN / (m/s) = ton / s
-} deriving (Eq, Show, Read)
+} deriving (Eq, Ord, Show, Read)
 
 vac_isp :: (Ord v, Fractional v) => Thruster v -> v
 vac_isp = ($ 0) . piecewise_linear . isp
@@ -93,6 +93,12 @@ instance (Ord v, Fractional v) => Monoid (Thruster v) where
             x_ratio = mass_flow x/total_mass_flow
             y_ratio = mass_flow y/total_mass_flow
 
+thruster_cluster :: Num v => v -> Thruster v -> Thruster v
+thruster_cluster n t = t {
+    vac_thrust = n * vac_thrust t,
+    mass_flow  = n * mass_flow t
+}
+
 data Size = Tiny | Small | Mk1 | Mk2 | Large | Mk3 | ExtraLarge deriving (Eq, Ord, Show, Read)
 
 data Geometry = Geometry {
@@ -100,7 +106,7 @@ data Geometry = Geometry {
     radial_mount :: Bool,
     top :: [Size],
     bottom :: [Size]
-} deriving (Eq, Show, Read)
+} deriving (Eq, Ord, Show, Read)
 
 symetric :: [Size] -> [Size] -> Geometry
 symetric top bottom = Geometry {

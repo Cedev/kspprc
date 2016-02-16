@@ -31,7 +31,7 @@ describe_stage es = do
     putStrLn $ "    mass flow  = " ++ (show . fromRational . (*1000) . mass_flow . engine) s ++ " kg/s"
     putStrLn $ "    burn time  = " ++ (show . fromRational) ((total_mass s - total_dry_mass s)/(mass_flow . engine) s) ++ " s"
         
-    mapM_ (\g -> putStrLn $ "    " ++ (show . length) g ++ " " ++ head g) . group . map name $ components s
+    mapM_ (\(p, n) -> putStrLn $ "    " ++ show n ++ " " ++ name p) . quantities $ components s
     
     putStrLn ""
 

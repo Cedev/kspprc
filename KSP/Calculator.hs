@@ -27,12 +27,15 @@ import KSP.Assembly
 import KSP.Evaluation
 import KSP.Stage
 
+import Debug.Trace
+traceShow_ f x = traceShow (f x) x
+
 stage_metric = Rocketry.stage_specific_impulse . evaluation &&& Down . total_parts . evaluated_stage &&& Down . total_cost . evaluated_stage
 
 by_stage_metric = (<) `on` stage_metric
 
-suboptimal_engine_stage :: (EvaluatedStage -> EvaluatedStage -> Bool) -> StageAssembly -> Part Rational -> EvaluatedStage
-suboptimal_engine_stage admit sa engine = get_stage . snd $ visitOn_ (expansion_order . get_stage . snd) better_than expand (state parts empty_stage)
+suboptimal_engine_stage :: (EvaluatedStage -> EvaluatedStage -> Bool) -> StageAssembly -> EvaluatedStage
+suboptimal_engine_stage admit sa = get_stage . snd $ visitOn_ (expansion_order . get_stage . snd) better_than expand (state parts sa)
     where
         expansion_order = total_dry_mass . evaluated_stage &&& Down . stage_metric
 
@@ -50,18 +53,30 @@ suboptimal_engine_stage admit sa engine = get_stage . snd $ visitOn_ (expansion_
         parts :: [Part Rational]
         parts = sortOn (Down . dry_mass) . filter (fuels stage_thruster) $ allowed_parts sa
         
-        stage_thruster = (fromJust . thruster) engine
-        
-        empty_stage :: StageAssembly
-        empty_stage = add_part sa engine
+        stage_thruster = engine . evaluated_stage . get_stage $ sa
 
-optimal_engine_stage :: StageAssembly -> Part Rational -> EvaluatedStage
+optimal_engine_stage :: StageAssembly -> EvaluatedStage
 optimal_engine_stage = suboptimal_engine_stage by_stage_metric
 
-optimal_stage :: (StageAssembly -> Part Rational -> EvaluatedStage) -> StageAssembly -> EvaluatedStage
+optimal_engines_stage :: (StageAssembly -> EvaluatedStage) -> StageAssembly -> Part Rational -> EvaluatedStage
+optimal_engines_stage optimal_engine_stage sa engine = fst $ visitOn_ (const ()) (by_stage_metric `on` traceShow_ (Rocketry.stage_specific_impulse . evaluation) . fst) expand (state $ add_part sa engine)
+    where
+        expand (es, sa) =
+            if thrust > a * engine_mass
+            then [state $ add_part sa (traceShow_ name engine)]
+            else []
+            where
+                me = head . Rocketry.maneuvers . evaluation $ es
+                a = Rocketry.gravity . Rocketry.maneuver $ me
+                thrust = Rocketry.maneuver_mass_flow me * Rocketry.maneuver_isp me
+                engine_mass = fromRational . sum . scale (*) dry_mass . filter_components (isJust . thruster) . components . evaluated_stage $ es
+        state = optimal_engine_stage &&& id
+
+optimal_stage :: (StageAssembly -> EvaluatedStage) -> StageAssembly -> EvaluatedStage
 optimal_stage optimal_engine_stage sa = head . sortOn (Down . stage_metric) $ engine_stages
     where
-        engine_stages = map (optimal_engine_stage sa) engines
+        engine_stages = map (optimal_engines_stage optimal_engine_stage sa) engines
+        -- engine_stages = map (optimal_engine_stage . add_part sa) engines
         engines = filter (isJust . thruster) $ allowed_parts sa
 
 optimal_mission_stages :: VehicleAssembly -> [EvaluatedStage]
