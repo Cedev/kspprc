@@ -51,8 +51,10 @@ main = do
     
     putStrLn "Demo mission"
     let mission_profile = [
-            Rocketry.Maneuver {Rocketry.delta_v = 6000, Rocketry.gravity=0, Rocketry.environment=space},
-            Rocketry.Maneuver {Rocketry.delta_v = 4000, Rocketry.gravity=g, Rocketry.environment=Environment 1}]
-        mission_assembly = mission_vehicle_assembly 0.1 mission_profile parts
-        mission' = shifted_mission_stages 5 mission_assembly
+            -- Rocketry.Maneuver {Rocketry.delta_v = 6000, Rocketry.gravity=0, Rocketry.environment=space}
+            --,
+            Rocketry.Maneuver {Rocketry.delta_v = 4000, Rocketry.gravity=g, Rocketry.environment=Environment 1}
+            ]
+        mission_assembly = mission_vehicle_assembly 100 mission_profile parts
+        mission' = shifted_mission_stages 100 mission_assembly
     mapM_ describe_stage mission'

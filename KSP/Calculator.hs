@@ -63,18 +63,19 @@ optimal_engine_stage :: StageAssembly -> EvaluatedStage
 optimal_engine_stage = suboptimal_engine_stage by_stage_metric
 
 optimal_engines_stage :: (StageAssembly -> EvaluatedStage) -> StageAssembly -> Part Rational -> EvaluatedStage
-optimal_engines_stage optimal_engine_stage sa engine = fst $ visitOn_ (const ()) (by_stage_metric `on` fst) expand (state $ add_part sa $ traceShow_ name engine)
+optimal_engines_stage optimal_engine_stage sa engine =
+    if do_search
+    then unimodalMaximumOn stage_metric cluster
+    else s1
     where
-        expand (es, sa) =
-            if thrust > a * engine_mass
-            then [state $ add_part sa engine]
-            else []
-            where
-                me = head . Rocketry.maneuvers . evaluation $ es
-                a = Rocketry.gravity . Rocketry.maneuver $ me
-                thrust = Rocketry.maneuver_mass_flow me * Rocketry.maneuver_isp me
-                engine_mass = fromRational . sum . scale (*) dry_mass . filter_components (isJust . thruster) . components . evaluated_stage $ es
-        state = traceShow_ (Rocketry.stage_specific_impulse . evaluation) . optimal_engine_stage &&& id
+        cluster n = optimal_engine_stage $ add_parts sa (n+1) engine
+
+        do_search = thrust > a * engine_mass
+        s1 = optimal_engine_stage $ add_part sa engine
+        me = head . Rocketry.maneuvers . evaluation $ s1
+        a = Rocketry.gravity . Rocketry.maneuver $ me
+        thrust = Rocketry.maneuver_mass_flow me * Rocketry.maneuver_isp me
+        engine_mass = fromRational . sum . scale (*) dry_mass . filter_components (isJust . thruster) . components . evaluated_stage $ s1
 
 optimal_stage :: (StageAssembly -> EvaluatedStage) -> StageAssembly -> EvaluatedStage
 optimal_stage optimal_engine_stage sa = head . sortOn (Down . stage_metric) $ engine_stages

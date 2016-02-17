@@ -24,6 +24,7 @@ data Stage = Stage {
     total_capacity :: ResourceVector Rational,
     total_mass :: Rational,
     total_parts :: Integer,
+    total_engines :: Integer,
     total_cost :: Rational,
     components :: Map.Map (Part Rational) Integer,
     payload_mass :: Rational
@@ -36,6 +37,7 @@ instance Monoid Stage where
         total_capacity = zero,
         total_mass     = 0,
         total_parts    = 0,
+        total_engines  = 0,
         total_cost     = 0,
         components     = Map.empty,
         payload_mass   = 0
@@ -47,6 +49,7 @@ instance Monoid Stage where
         total_capacity = total_capacity x ^+^ total_capacity y,
         total_mass     = total_mass x     +   total_mass y,
         total_parts    = total_parts x    +   total_parts y,
+        total_engines  = total_engines x  +   total_engines y,
         total_cost     = total_cost x     +   total_cost y,
         components = Map.unionWith (+) (components x) (components y),
         payload_mass   = payload_mass x   +   payload_mass y
@@ -80,6 +83,7 @@ part_stage n p = Stage {
     total_capacity = n' *^ capacity p,
     total_mass     = n' * dry_mass p + resource_density `dot` new_capacity,
     total_parts    = n,
+    total_engines  = if isJust . thruster $ p then n else 0,
     total_cost     = n' * dry_cost p + resource_cost `dot` new_capacity,
     components     = Map.singleton p n,
     payload_mass   = 0
