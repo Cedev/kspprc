@@ -35,7 +35,7 @@ stage_metric = Rocketry.stage_specific_impulse . evaluation &&& Down . total_par
 by_stage_metric = (<) `on` stage_metric
 
 suboptimal_engine_stage :: (EvaluatedStage -> EvaluatedStage -> Bool) -> StageAssembly -> EvaluatedStage
-suboptimal_engine_stage admit sa = get_stage . snd $ visitOn_ (expansion_order . get_stage . snd) better_than expand (state parts sa)
+suboptimal_engine_stage admit sa = get_stage . snd $ visitOn_ (expansion_order . get_stage . snd) better_than expand initial_state
     where
         expansion_order = total_dry_mass . evaluated_stage &&& Down . stage_metric
 
@@ -50,6 +50,10 @@ suboptimal_engine_stage admit sa = get_stage . snd $ visitOn_ (expansion_order .
         state :: [Part Rational] -> StageAssembly -> (([Part Rational], EvaluatedStage -> Bool), StageAssembly)
         state parts s = ((parts, admit (get_stage s)), s)
 
+        -- Allways add at least one fuel tank if possible
+        -- Necessary for meaningful delta-v comparisons when considering multiple engines
+        initial_state = ((parts, const True), sa)
+
         parts :: [Part Rational]
         parts = sortOn (Down . dry_mass) . filter (fuels stage_thruster) $ allowed_parts sa
         
@@ -59,18 +63,18 @@ optimal_engine_stage :: StageAssembly -> EvaluatedStage
 optimal_engine_stage = suboptimal_engine_stage by_stage_metric
 
 optimal_engines_stage :: (StageAssembly -> EvaluatedStage) -> StageAssembly -> Part Rational -> EvaluatedStage
-optimal_engines_stage optimal_engine_stage sa engine = fst $ visitOn_ (const ()) (by_stage_metric `on` traceShow_ (Rocketry.stage_specific_impulse . evaluation) . fst) expand (state $ add_part sa engine)
+optimal_engines_stage optimal_engine_stage sa engine = fst $ visitOn_ (const ()) (by_stage_metric `on` fst) expand (state $ add_part sa $ traceShow_ name engine)
     where
         expand (es, sa) =
             if thrust > a * engine_mass
-            then [state $ add_part sa (traceShow_ name engine)]
+            then [state $ add_part sa engine]
             else []
             where
                 me = head . Rocketry.maneuvers . evaluation $ es
                 a = Rocketry.gravity . Rocketry.maneuver $ me
                 thrust = Rocketry.maneuver_mass_flow me * Rocketry.maneuver_isp me
                 engine_mass = fromRational . sum . scale (*) dry_mass . filter_components (isJust . thruster) . components . evaluated_stage $ es
-        state = optimal_engine_stage &&& id
+        state = traceShow_ (Rocketry.stage_specific_impulse . evaluation) . optimal_engine_stage &&& id
 
 optimal_stage :: (StageAssembly -> EvaluatedStage) -> StageAssembly -> EvaluatedStage
 optimal_stage optimal_engine_stage sa = head . sortOn (Down . stage_metric) $ engine_stages
@@ -94,19 +98,22 @@ shifted_mission_stages n va = go n va (optimal_mission_stages va)
         go :: Int -> VehicleAssembly -> [EvaluatedStage] -> [EvaluatedStage]
         go _ _       []             = []
         go _ _       [s]            = [s]
+        go 0 va      (s : ss)       = s : go n (add_stage va s) ss
         go i va      (s0 : s1 : ss) =
-            if i == 0 || s == s0
+            if s == s0
             then s : go n (add_stage va s) (tail plan)
             else go (i-1) va plan
             where
+                isp_s0 = Rocketry.stage_specific_impulse (evaluation s0)
                 isp_s1 = Rocketry.stage_specific_impulse (evaluation s1)
                 rebalancing_comparisson =
-                    if Rocketry.stage_specific_impulse (evaluation s0) >= isp_s1
+                    if isp_s0 >= isp_s1
                     then \x y -> by_stage_metric x y || Rocketry.marginal_stage_specific_impulse (evaluation x) (evaluation y) >  isp_s1
                     else \x y -> by_stage_metric x y && Rocketry.marginal_stage_specific_impulse (evaluation x) (evaluation y) >= isp_s1
                 s0' = optimal_stage (suboptimal_engine_stage rebalancing_comparisson) (stage_assembly va)
                 ss' = optimal_mission_stages (add_stage va s0')
                 plan :: [EvaluatedStage]
-                plan = minimumOn (total_mass . evaluated_stage . last) $ [s0 : s1 : ss, s0' : ss']
+                -- plan = minimumOn (total_mass . evaluated_stage . last) $ [s0 : s1 : ss, s0' : ss']
+                plan = s0' : ss'
                 s :: EvaluatedStage
                 s = head plan

@@ -28,5 +28,5 @@ visitOn_ :: Ord e => (a -> e) ->
                      a
 visitOn_ expansion_order better_than expand initial = execState search initial
     where
-        search = visitOn expansion_order visit expand (expand initial)
+        search = visitOn expansion_order visit expand . filter (better_than initial) . expand $ initial
         visit a = put a >> return (better_than a)
