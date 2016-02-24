@@ -13,6 +13,10 @@ import Numeric.AD.Newton.Double
 
 import Search
 
+import Debug.Trace
+traceShow_ f x = traceShow (f x) x
+traceShow' n f x = trace (n ++ (show . f) x) x
+
 data Stage e = Stage {
     payload_mass :: Rational,
     total_mass :: Rational,
@@ -52,10 +56,8 @@ data ManeuverEvaluation e = ManeuverEvaluation {
 {-
 Compensation for gravity
     compute the burn time of the rocket.
-    multiply the burn time by the acceleration due to gravity (in the direction opposite to the rocket's thrust),
-    subtract the product from the delta-v
 
-    delta_v = isp * log((dry_mass + ejected_mass)/dry_mass) - g * ejected_mass/mass_flow
+    See notes
 -}
 
 {-
@@ -143,11 +145,20 @@ evaluate_stage maneuvers stage = stage_evaluation stage $ go maneuvers 0
                 burn_time :: (Scalar t ~ Double, Mode t, Floating t) => t -> t
                 burn_time em = em/auto maneuver_mass_flow
 
+                stage_dv ::  (Scalar t ~ Double, Mode t, Floating t) => t -> t
+                stage_dv em = auto maneuver_isp * log ((auto maneuver_dry_mass+em)/auto maneuver_dry_mass) 
+
+                -- Assumes constant acceleration
                 gravity_dv :: (Scalar t ~ Double, Mode t, Floating t) => t -> t
-                gravity_dv em = (auto $ gravity maneuver)*burn_time em
+                gravity_dv em = sqrt(stage_dv em *(auto $ gravity maneuver)*burn_time em + auto (ve*ve)) - auto ve
+
+                -- Assumes the effective final velocity (Ve) of the maneuver is the maneuver delta-v
+                ve = delta_v maneuver
 
                 dv :: (Scalar t ~ Double, Mode t, Floating t) => t -> t
-                dv em = auto maneuver_isp * log ((auto maneuver_dry_mass+em)/auto maneuver_dry_mass) - gravity_dv em
+                dv em = if maneuver_isp * maneuver_mass_flow >= maneuver_dry_mass * gravity maneuver
+                        then stage_dv em - gravity_dv em
+                        else stage_dv em - (auto $ gravity maneuver)*burn_time em
 
                 available_delta_v = dv available_ejected_mass
                 inv_dv =  last . take 64 . inverse dv 0
